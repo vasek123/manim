@@ -182,10 +182,8 @@ class DissipatingTracedPath(VGroup):
             self.tracing_points.append(new_point)
             self.time_traced_at.append(self.total_time)
         else:
-            dist = np.linalg.norm(self.tracing_points[-1] - new_point)
-            if dist >= self.min_distance_to_new_point:
-                self.tracing_points.append(new_point)
-                self.time_traced_at.append(self.total_time)
+            self.tracing_points.append(new_point)
+            self.time_traced_at.append(self.total_time)
 
         # Compute the current visibility of the lines
         # This controls the opacities and stroke widths of the lines
