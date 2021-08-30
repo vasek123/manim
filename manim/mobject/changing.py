@@ -1,11 +1,12 @@
 """Animation of a mobject boundary and tracing of points."""
 
-__all__ = ["AnimatedBoundary", "TracedPath"]
+__all__ = ["AnimatedBoundary", "TracedPath", "DissipatingTracedPath"]
 
 import numpy as np
 
 from .._config import config
 from ..constants import *
+from ..mobject.geometry import Line
 from ..mobject.types.vectorized_mobject import VGroup, VMobject
 from ..utils.color import BLUE_B, BLUE_D, BLUE_E, GREY_BROWN, WHITE
 from ..utils.rate_functions import smooth
@@ -140,3 +141,89 @@ class TracedPath(VMobject, metaclass=ConvertToOpenGL):
             dist = np.linalg.norm(new_point - self.get_points()[-nppcc])
             if dist >= self.min_distance_to_new_point:
                 self.add_line_to(new_point)
+
+
+class DissipatingTracedPath(VGroup):
+    def __init__(
+        self,
+        traced_point_func,
+        stroke_width=2,
+        stroke_color=WHITE,
+        min_distance_to_new_point=0.1,
+        dissipate_opacity=False,
+        dissipate_stroke=True,
+        dissipate_after=0,
+        dissipation_duration=1,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.traced_point_func = traced_point_func
+        self.stroke_width = stroke_width
+        self.stroke_color = stroke_color
+        self.min_distance_to_new_point = min_distance_to_new_point
+        self.dissipate_opacity = dissipate_opacity
+        self.dissipate_stroke = dissipate_stroke
+        self.dissipate_after = dissipate_after
+        self.dissipation_duration = dissipation_duration
+
+        self.total_time = 0
+        self.tracing_points = []
+        self.time_traced_at = []
+
+        self.add_updater(lambda m, dt: m.update_path(dt))
+
+    def update_path(self, dt):
+
+        self.total_time += dt
+
+        # Trace a new point
+        new_point = self.traced_point_func()
+        if len(self.tracing_points) == 0:
+            self.tracing_points.append(new_point)
+            self.time_traced_at.append(self.total_time)
+        else:
+            dist = np.linalg.norm(self.tracing_points[-1] - new_point)
+            if dist >= self.min_distance_to_new_point:
+                self.tracing_points.append(new_point)
+                self.time_traced_at.append(self.total_time)
+
+        # Compute the current visibility of the lines
+        # This controls the opacities and stroke widths of the lines
+        # Could be possibly combined with a rate function
+        visibility = 1 - np.clip(
+            (self.total_time - np.array(self.time_traced_at) - self.dissipate_after)
+            / self.dissipation_duration,
+            0,
+            1,
+        )
+
+        # Cutoff the points that have already been made invisible
+        cutoff = np.argmax(visibility != 0, axis=0)
+        progress = visibility[cutoff:]
+        self.tracing_points = self.tracing_points[cutoff:]
+        self.time_traced_at = self.time_traced_at[cutoff:]
+
+        # Prepare the new opacities and stroke widths
+        if self.dissipate_opacity:
+            line_opacities = progress
+        if self.dissipate_stroke:
+            line_stroke_widths = progress * self.stroke_width
+
+        # Remove the old lines contained in the VGroup
+        self.remove(*self.submobjects)
+
+        # Create new lines with the updated opacities and stroke widths
+        for point_idx in range(len(self.tracing_points) - 1):
+            line = Line(
+                start=self.tracing_points[point_idx],
+                end=self.tracing_points[point_idx + 1],
+            ).set_stroke(color=self.stroke_color)
+
+            if self.dissipate_opacity:
+                line.set_opacity(opacity=line_opacities[point_idx])
+            if self.dissipate_stroke:
+                line.set_stroke(width=line_stroke_widths[point_idx])
+            else:
+                line.set_stroke(width=self.stroke_width)
+
+            self.add(line)
